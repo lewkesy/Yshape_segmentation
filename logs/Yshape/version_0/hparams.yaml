@@ -1,0 +1,14 @@
+FL_alpha: 1.3177083333333333
+FL_gamma: 2
+batch_size: 200
+bn_momentum: 0.5
+bnm_decay: 0.5
+data_src: /media/dummy1/zhou1178/Yshape
+decay_step: 300000.0
+input_channels: 0
+key_filename: y_shape.pkl
+lc_count: 256
+lr: 0.005
+lr_decay: 0.5
+use_xyz: true
+weight_decay: 0.0

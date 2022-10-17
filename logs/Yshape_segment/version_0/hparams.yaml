@@ -1,0 +1,13 @@
+FL_alpha: 1.3177083333333333
+FL_gamma: 2
+batch_size: 100
+bn_momentum: 0.5
+bnm_decay: 0.5
+data_src: ./data/
+decay_step: 300000.0
+input_channels: 0
+lc_count: 256
+lr: 0.005
+lr_decay: 0.5
+use_xyz: true
+weight_decay: 0.0
