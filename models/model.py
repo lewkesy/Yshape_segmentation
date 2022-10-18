@@ -62,46 +62,35 @@ class Segmentation(pl.LightningModule):
         c_in = 0
         self.SA_modules.append(
             PointnetSAModuleMSG(
-                npoint=1024,
+                npoint=self.hparams['lc_count'],
                 radii=[0.05, 0.1],
                 nsamples=[16, 32],
-                mlps=[[c_in, 16, 16, 32], [c_in, 32, 32, 64]],
-                use_xyz=self.hparams.use_xyz,
+                mlps=[[c_in, 16, 16, 16], [c_in, 32, 32, 32]],
+                use_xyz=self.hparams['use_xyz'],
             )
         )
-        c_out_0 = 32 + 64
 
-        c_in = c_out_0
+        c_out_0 = 16 + 32
+
         self.SA_modules.append(
             PointnetSAModuleMSG(
-                npoint=256,
-                radii=[0.1, 0.2],
-                nsamples=[16, 32],
-                mlps=[[c_in, 64, 64, 128], [c_in, 64, 96, 128]],
-                use_xyz=self.hparams.use_xyz,
-            )
-        )
-        c_out_1 = 128 + 128
-
-        c_in = c_out_1
-        self.SA_modules.append(
-            PointnetSAModuleMSG(
-                npoint=64,
+                npoint=128,
                 radii=[0.2, 0.4],
                 nsamples=[16, 32],
-                mlps=[[c_in, 128, 196, 256], [c_in, 128, 196, 256]],
-                use_xyz=self.hparams.use_xyz,
+                mlps=[[c_out_0, 64, 64, 128],
+                      [c_out_0, 64, 64, 128]],
+                use_xyz=self.hparams['use_xyz'],
             )
         )
-        c_out_2 = 256 + 256
+
+        c_out_1 = 128 + 128
 
         self.FP_modules = nn.ModuleList()
-        self.FP_modules.append(PointnetFPModule(mlp=[128, 128, 128]))
-        self.FP_modules.append(PointnetFPModule(mlp=[c_out_0+128, 256, 128]))
-        self.FP_modules.append(PointnetFPModule(mlp=[c_out_2+c_out_1, 256, 128]))
+        self.FP_modules.append(PointnetFPModule(mlp=[64, 256, 64]))
+        self.FP_modules.append(PointnetFPModule(mlp=[c_out_0+c_out_1, 256, 64]))
 
         self.seg_layer = nn.Sequential(
-            nn.Conv1d(128, 128, kernel_size=1, bias=False),
+            nn.Conv1d(64, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Dropout(0.5),

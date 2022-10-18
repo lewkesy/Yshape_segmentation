@@ -5,6 +5,7 @@ import torch.utils.data as data
 import pickle
 import h5py
 from plyfile import PlyData, PlyElement
+from IPython import embed
 
 class RealTreeDataset(data.Dataset):
 
@@ -35,7 +36,7 @@ class SyntheticTreeDataset(data.Dataset):
     def __init__(self, data_src, mode):
         super().__init__()
         
-        self.data_src = self.data_src
+        self.data_src = data_src
         data_list = os.listdir(data_src)
         
         if mode == 'train':
@@ -49,17 +50,20 @@ class SyntheticTreeDataset(data.Dataset):
     
     def __getitem__(self, index):
         filename = os.path.join(self.data_src, self.data_list[index])
+        
         data = PlyData.read(filename)
 
         x = data['vertex']['x']
         y = data['vertex']['y']
         z = data['vertex']['z']
 
-        pc = torch.from_numpy(np.stack([x, y, z]).T).float()
-        isforks = np.array(data['junction']['value'])
+        idx = np.random.choice(x.shape[0], 16000)
+        pc = torch.Tensor(np.stack([x, y, z]).T).float()[idx]
+        pc /= abs(pc).max()
+        isforks = np.array(data['junction']['value']).astype(np.double)[idx]
 
         gt_dict = {'is_fork': torch.from_numpy(isforks)}
-
+        
         return pc, gt_dict
 
 
