@@ -60,7 +60,7 @@ class SyntheticTreeDataset(data.Dataset):
         idx = np.random.choice(x.shape[0], 16000)
         pc = torch.Tensor(np.stack([x, y, z]).T).float()[idx]
         pc /= abs(pc).max()
-        isforks = np.array(data['junction']['value']).astype(np.double)[idx]
+        isforks = np.array(data['junction']['value']).astype(np.long)[idx]
 
         gt_dict = {'is_fork': torch.from_numpy(isforks)}
         
