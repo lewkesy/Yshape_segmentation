@@ -23,7 +23,8 @@ def data_process(fn, num=None):
             idx = np.random.choice(data[label].shape[0], num)
             data[label] = data[label][idx]
     
-    return data
+    res_dict = {'name': fn}
+    return data, res_dict
 
 
 def centralize_data(data):

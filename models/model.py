@@ -85,16 +85,30 @@ class Segmentation(pl.LightningModule):
 
         c_out_1 = 128 + 128
 
+        self.SA_modules.append(
+            PointnetSAModuleMSG(
+                npoint=128,
+                radii=[0.2, 0.4],
+                nsamples=[16, 32],
+                mlps=[[c_out_1, 256, 256, 256],
+                      [c_out_1, 256, 256, 256]],
+                use_xyz=self.hparams['use_xyz'],
+            )
+        )
+
+        c_out_2 = 256 + 256
+
         self.FP_modules = nn.ModuleList()
         self.FP_modules.append(PointnetFPModule(mlp=[64, 256, 64]))
-        self.FP_modules.append(PointnetFPModule(mlp=[c_out_0+c_out_1, 256, 64]))
+        self.FP_modules.append(PointnetFPModule(mlp=[256, 256, 64]))
+        self.FP_modules.append(PointnetFPModule(mlp=[c_out_2+c_out_1, 256, 256]))
 
         self.seg_layer = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=1, bias=False),
+            nn.Linear(64, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Dropout(0.5),
-            nn.Conv1d(128, 2, kernel_size=1),
+            nn.Linear(128, 2),
         )
 
 

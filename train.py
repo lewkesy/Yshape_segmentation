@@ -13,7 +13,7 @@ if __name__ == "__main__":
                'lc_count' : 256,
                'input_channels' : 0,
                'use_xyz' : True,
-               'lr': 0.001,
+               'lr': 0.0005,
                'weight_decay': 0.0,
                'lr_decay': 0.5,
                'decay_step': 3e5,
@@ -21,12 +21,12 @@ if __name__ == "__main__":
                'bnm_decay': 0.5,
                'FL_alpha': 253/192,
                'FL_gamma': 2,
-               'data_src': '/media/dummy1/zhou1178/TreePartNet/NeuralDecomposition/',
+               'data_src': '/mnt/samsung2t/zhou1178/PointCloud/',
                }
 
     logger = TensorBoardLogger("logs", name="Yshape_segment")
 
-    model = Segmentation(hparams)
+    model = Segmentation.load_from_checkpoint('_ckpt_epoch_151.ckpt')
     checkpoint_callback = ModelCheckpoint(
         filepath=os.path.join(os.getcwd(),'ckpt'),
         save_top_k=3,
@@ -36,8 +36,8 @@ if __name__ == "__main__":
     )
     
     trainer = pl.Trainer(
-        gpus="2",
-        distributed_backend='ddp',
+        gpus="0",
+        # distributed_backend='ddp',
         checkpoint_callback=checkpoint_callback,
         max_epochs=500,
         logger=logger
