@@ -49,6 +49,35 @@ class BNMomentumScheduler(lr_sched.LambdaLR):
 lr_clip = 1e-5
 bnm_clip = 1e-2
 
+
+class FocalLoss(nn.Module):
+    '''
+    Focal Loss
+        FL=alpha*(1-p)^gamma*log(p) where p is the probability of ground truth class
+    Parameters:
+        alpha(1D tensor): weight for positive
+        gamma(1D tensor):
+    '''
+    def __init__(self, alpha=1, gamma=2, reduce='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha=torch.tensor(alpha)
+        self.gamma=gamma
+        self.reduce=reduce
+
+    def forward(self, input, target):
+        BCE_Loss = F.binary_cross_entropy_with_logits(input, target, reduction='none')
+        pt = torch.exp(-BCE_Loss)
+        Focal_Loss = torch.pow((1-pt), self.gamma) * F.binary_cross_entropy_with_logits(
+            input, target, pos_weight=self.alpha, reduction='none')
+
+        if self.reduce=='none':
+            return Focal_Loss
+        elif self.reduce=='sum':
+            return torch.sum(Focal_Loss)
+        else:
+            return torch.mean(Focal_Loss)
+
+
 class Segmentation(pl.LightningModule):
     def __init__(self, hparams):
         super().__init__()
@@ -65,17 +94,17 @@ class Segmentation(pl.LightningModule):
                 npoint=self.hparams['lc_count'],
                 radii=[0.05, 0.1],
                 nsamples=[16, 32],
-                mlps=[[c_in, 16, 16, 16], [c_in, 32, 32, 32]],
+                mlps=[[c_in, 16, 16, 32], [c_in, 32, 32, 64]],
                 use_xyz=self.hparams['use_xyz'],
             )
         )
 
-        c_out_0 = 16 + 32
+        c_out_0 = 32 + 64
 
         self.SA_modules.append(
             PointnetSAModuleMSG(
                 npoint=128,
-                radii=[0.2, 0.4],
+                radii=[0.1, 0.2],
                 nsamples=[16, 32],
                 mlps=[[c_out_0, 64, 64, 128],
                       [c_out_0, 64, 64, 128]],
@@ -87,28 +116,27 @@ class Segmentation(pl.LightningModule):
 
         self.SA_modules.append(
             PointnetSAModuleMSG(
-                npoint=128,
+                npoint=64,
                 radii=[0.2, 0.4],
                 nsamples=[16, 32],
-                mlps=[[c_out_1, 256, 256, 256],
-                      [c_out_1, 256, 256, 256]],
+                mlps=[[c_out_1, 256, 256, 512],
+                      [c_out_1, 256, 256, 512]],
                 use_xyz=self.hparams['use_xyz'],
             )
         )
 
-        c_out_2 = 256 + 256
+        c_out_2 = 512 + 512
 
         self.FP_modules = nn.ModuleList()
         self.FP_modules.append(PointnetFPModule(mlp=[64, 256, 64]))
-        self.FP_modules.append(PointnetFPModule(mlp=[256, 256, 64]))
+        self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_0, 256, 64]))
         self.FP_modules.append(PointnetFPModule(mlp=[c_out_2+c_out_1, 256, 256]))
 
         self.seg_layer = nn.Sequential(
-            nn.Linear(64, 128),
+            nn.Conv1d(64, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
-            nn.Dropout(0.5),
-            nn.Linear(128, 2),
+            nn.Conv1d(128, 2, kernel_size=1),
         )
 
 
@@ -133,7 +161,11 @@ class Segmentation(pl.LightningModule):
         pc, gt_dict = batch
         seg_loss_func = torch.nn.CrossEntropyLoss()
         seg_pred = self.forward(pc)
-        seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
+        seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=1)
+
+        focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
+        seg_loss = focal_loss(seg_pred_softmax[:, 1, :], gt_dict['is_fork'].float())
+        # seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
 
         loss = seg_loss
         log = dict(train_loss=loss)
@@ -145,8 +177,12 @@ class Segmentation(pl.LightningModule):
         pc, gt_dict = batch
         seg_loss_func = torch.nn.CrossEntropyLoss()
         seg_pred = self.forward(pc)
-        seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
+        seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=1)
 
+        focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
+        seg_loss = focal_loss(seg_pred_softmax[:, 1, :], gt_dict['is_fork'].float())
+
+        # seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
         loss = seg_loss
         log = dict(val_loss=loss)
 
