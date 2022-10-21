@@ -6,6 +6,8 @@ import pickle
 import h5py
 from plyfile import PlyData, PlyElement
 from IPython import embed
+import torch.nn.functional as F
+
 
 class RealTreeDataset(data.Dataset):
 
@@ -57,13 +59,18 @@ class SyntheticTreeDataset(data.Dataset):
         y = data['vertex']['y']
         z = data['vertex']['z']
 
-        idx = np.random.choice(x.shape[0], 16000)
-        pc = torch.Tensor(np.stack([x, y, z]).T).float()[idx]
+        idx = np.random.choice(x.shape[0], 8000)
+
+        pc = (np.stack([x, y, z]).T)
+        offset = (np.max(pc, axis=0) + np.min(pc, axis=0)) / 2 - np.zeros(3,)
+
+        pc -= offset[None, :]
         pc /= abs(pc).max()
-        
+
+        pc = torch.Tensor(pc).float()[idx]
         isforks = np.array(data['junction']['value']).astype(np.long)[idx]
 
-        gt_dict = {'is_fork': torch.from_numpy(isforks), 'name': self.data_list[index]}
+        gt_dict = {'is_fork': F.one_hot(torch.from_numpy(isforks)), 'name': self.data_list[index]}
         
         return pc, gt_dict
 

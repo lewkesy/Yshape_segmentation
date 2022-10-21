@@ -1,4 +1,5 @@
 
+from fsspec import get_filesystem_class
 import pytorch_lightning as pl
 import torch
 import sys
@@ -10,6 +11,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dataloader.treeDataloader import SyntheticTreeDataset
 from utils.utils import cosine_similarity
+from torchvision.ops.focal_loss import sigmoid_focal_loss
+
 def set_bn_momentum_default(bn_momentum):
     def fn(m):
         if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
@@ -106,34 +109,48 @@ class Segmentation(pl.LightningModule):
                 npoint=128,
                 radii=[0.1, 0.2],
                 nsamples=[16, 32],
-                mlps=[[c_out_0, 64, 64, 128],
-                      [c_out_0, 64, 64, 128]],
+                mlps=[[c_out_0, 128, 128, 256],
+                      [c_out_0, 128, 128, 256]],
                 use_xyz=self.hparams['use_xyz'],
             )
         )
 
-        c_out_1 = 128 + 128
+        c_out_1 = 256 + 256
 
         self.SA_modules.append(
             PointnetSAModuleMSG(
-                npoint=64,
+                npoint=32,
                 radii=[0.2, 0.4],
                 nsamples=[16, 32],
-                mlps=[[c_out_1, 256, 256, 512],
-                      [c_out_1, 256, 256, 512]],
+                mlps=[[c_out_1, 256, 256, 256],
+                      [c_out_1, 256, 256, 256]],
                 use_xyz=self.hparams['use_xyz'],
             )
         )
 
-        c_out_2 = 512 + 512
+        c_out_2 = 256 + 256
+
+        self.SA_modules.append(
+            PointnetSAModuleMSG(
+                npoint=32,
+                radii=[0.2, 0.4],
+                nsamples=[16, 32],
+                mlps=[[c_out_2, 512, 512, 512],
+                      [c_out_2, 512, 512, 512]],
+                use_xyz=self.hparams['use_xyz'],
+            )
+        )
+
+        c_out_3 = 512 + 512
 
         self.FP_modules = nn.ModuleList()
-        self.FP_modules.append(PointnetFPModule(mlp=[64, 256, 64]))
-        self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_0, 256, 64]))
-        self.FP_modules.append(PointnetFPModule(mlp=[c_out_2+c_out_1, 256, 256]))
+        self.FP_modules.append(PointnetFPModule(mlp=[256, 128, 128]))
+        self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_0, 256, 256]))
+        self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_1, 256, 256]))
+        self.FP_modules.append(PointnetFPModule(mlp=[c_out_3+c_out_2, 256, 256]))
 
         self.seg_layer = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=1, bias=False),
+            nn.Conv1d(128, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Conv1d(128, 2, kernel_size=1),
@@ -154,17 +171,18 @@ class Segmentation(pl.LightningModule):
                 l_xyz[i - 1], l_xyz[i], l_features[i - 1], l_features[i]
             )
 
-        return self.seg_layer(l_features[0])
+        return self.seg_layer(l_features[0]).transpose(2, 1).contiguous()
 
 
     def training_step(self, batch, batch_idx):
         pc, gt_dict = batch
         seg_loss_func = torch.nn.CrossEntropyLoss()
         seg_pred = self.forward(pc)
-        seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=1)
+        
+        seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=2)
 
-        focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
-        seg_loss = focal_loss(seg_pred_softmax[:, 1, :], gt_dict['is_fork'].float())
+        # focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
+        seg_loss = sigmoid_focal_loss(seg_pred_softmax.reshape(-1, 2), gt_dict['is_fork'].float().reshape(-1, 2), alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduction='mean')
         # seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
 
         loss = seg_loss
@@ -177,16 +195,26 @@ class Segmentation(pl.LightningModule):
         pc, gt_dict = batch
         seg_loss_func = torch.nn.CrossEntropyLoss()
         seg_pred = self.forward(pc)
-        seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=1)
+        seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=2)
 
-        focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
-        seg_loss = focal_loss(seg_pred_softmax[:, 1, :], gt_dict['is_fork'].float())
-
+        # focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
+        seg_loss = sigmoid_focal_loss(seg_pred_softmax.reshape(-1, 2), gt_dict['is_fork'].float().reshape(-1, 2), alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduction='mean')
+        
         # seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
         loss = seg_loss
-        log = dict(val_loss=loss)
+        with torch.no_grad():
+            cls = torch.argmax(seg_pred_softmax, dim=2)
+            gt_cls = gt_dict['is_fork'][:, :, 1]
 
-        return dict(val_loss=loss, log=log, progress_bar=dict(val_loss=loss))
+            acc = (cls == gt_cls).sum() / cls.reshape(-1).shape[0]
+            pos_idx = torch.where(gt_cls == 1)
+            
+            recall = cls[pos_idx].sum() / gt_cls.sum()
+
+
+        log = dict(val_loss=loss, acc=acc, recall=recall)
+
+        return dict(val_loss=loss, log=log, progress_bar=dict(val_loss=loss, acc=acc, recall=recall))
 
 
     def validation_epoch_end(self, outputs):
