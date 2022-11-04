@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import numpy as np
 
@@ -6,6 +7,15 @@ def cosine_similarity(x1, x2):
     cos = nn.CosineSimilarity()
     return (1 - cos(x1, x2)).mean()
 
+
+def vector_normalization(vector):
+    if len(vector.shape) > 2:
+        vector = vector.reshape(-1, 3)
+    
+    vector = vector/ torch.sqrt(torch.sum(vector ** 2, dim=1))[:, None]
+
+    return vector
+    
 
 def data_process(fn, num=None):
     
@@ -34,7 +44,7 @@ def centralize_data(data):
     offset = (np.max(data, axis=0) + np.min(data, axis=0)) / 2 - np.zeros(3,)
     data -= offset[None, :]
     data /= abs(data).max()
-    data[:, [1, 2]] = data[:, [2, 1]]
+    # data[:, [1, 2]] = data[:, [2, 1]]
     # data[:, 1] = data[:, 1] - data[:, 1].min() - 1
 
     return data

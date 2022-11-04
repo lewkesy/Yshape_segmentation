@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from dataloader.treeDataloader import SyntheticTreeDataset
 from utils.utils import cosine_similarity
 from torchvision.ops.focal_loss import sigmoid_focal_loss
+from utils.utils import cosine_similarity, vector_normalization
 
 def set_bn_momentum_default(bn_momentum):
     def fn(m):
@@ -149,11 +150,18 @@ class Segmentation(pl.LightningModule):
         self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_1, 256, 256]))
         self.FP_modules.append(PointnetFPModule(mlp=[c_out_3+c_out_2, 256, 256]))
 
-        self.seg_layer = nn.Sequential(
+        self.juncion_segmentation_layer = nn.Sequential(
             nn.Conv1d(128, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Conv1d(128, 2, kernel_size=1),
+        )
+        
+        self.direction_layer = nn.Sequential(
+            nn.Conv1d(128, 128, kernel_size=1, bias=False),
+            nn.BatchNorm1d(128),
+            nn.ReLU(True),
+            nn.Conv1d(128, 3, kernel_size=1),
         )
 
 
@@ -171,35 +179,48 @@ class Segmentation(pl.LightningModule):
                 l_xyz[i - 1], l_xyz[i], l_features[i - 1], l_features[i]
             )
 
-        return self.seg_layer(l_features[0]).transpose(2, 1).contiguous()
+        return self.juncion_segmentation_layer(l_features[0]).transpose(2, 1).contiguous(), self.direction_layer(l_features[0]).transpose(2, 1).contiguous()
 
 
     def training_step(self, batch, batch_idx):
         pc, gt_dict = batch
         seg_loss_func = torch.nn.CrossEntropyLoss()
-        seg_pred = self.forward(pc)
+        seg_pred, dir_pred = self.forward(pc)
         
         seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=2)
 
         # focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
         seg_loss = sigmoid_focal_loss(seg_pred_softmax.reshape(-1, 2), gt_dict['is_fork'].float().reshape(-1, 2), alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduction='mean')
+        dir_loss = cosine_similarity(vector_normalization(dir_pred.reshape(-1, 3)), vector_normalization(gt_dict['dir'].float().reshape(-1, 3)))
         # seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
 
-        loss = seg_loss
+        with torch.no_grad():
+            cls = torch.argmax(seg_pred_softmax, dim=2)
+            gt_cls = gt_dict['is_fork'][:, :, 1]
+
+            acc = (cls == gt_cls).sum() / cls.reshape(-1).shape[0]
+            pos_idx = torch.where(gt_cls == 1)
+            
+            recall = cls[pos_idx].sum() / gt_cls.sum()
+
+        loss = seg_loss + dir_loss
         log = dict(train_loss=loss)
 
-        return dict(loss=loss, log=log, progress_bar=dict(train_loss=loss))
+        return dict(loss=loss, log=log, progress_bar=dict(train_loss=loss, dir_loss=dir_loss, acc=acc, recall=recall))
 
 
     def validation_step(self, batch, batch_idx):
         pc, gt_dict = batch
         seg_loss_func = torch.nn.CrossEntropyLoss()
-        seg_pred = self.forward(pc)
+        seg_pred, dir_pred = self.forward(pc)
+
         seg_pred_softmax = torch.nn.functional.softmax(seg_pred, dim=2)
 
         # focal_loss = FocalLoss(alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduce='mean')
         seg_loss = sigmoid_focal_loss(seg_pred_softmax.reshape(-1, 2), gt_dict['is_fork'].float().reshape(-1, 2), alpha=self.hparams['FL_alpha'], gamma=self.hparams['FL_gamma'], reduction='mean')
-        
+        dir_loss = cosine_similarity(vector_normalization(dir_pred.reshape(-1, 3)), vector_normalization(gt_dict['dir'].float().reshape(-1, 3)))
+
+
         # seg_loss = seg_loss_func(seg_pred, gt_dict['is_fork'])
         loss = seg_loss
         with torch.no_grad():
@@ -214,7 +235,7 @@ class Segmentation(pl.LightningModule):
 
         log = dict(val_loss=loss, acc=acc, recall=recall)
 
-        return dict(val_loss=loss, log=log, progress_bar=dict(val_loss=loss, acc=acc, recall=recall))
+        return dict(val_loss=loss, log=log, acc=acc, recall=recall, progress_bar=dict(val_loss=loss, dir_loss=dir_loss, acc=acc, recall=recall))
 
 
     def validation_epoch_end(self, outputs):

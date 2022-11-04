@@ -59,18 +59,29 @@ class SyntheticTreeDataset(data.Dataset):
         y = data['vertex']['y']
         z = data['vertex']['z']
 
-        idx = np.random.choice(x.shape[0], 8000)
+        dx = data['junction']['jx']
+        dy = data['junction']['jy']
+        dz = data['junction']['jz']
+
+        isforks = np.round(np.sqrt(dx**2 + dy**2 + dz**2) == 1)
+
+        idx = np.random.choice(x.shape[0], 24000)
 
         pc = (np.stack([x, y, z]).T)
+        direction = (np.stack([dx, dy, dz]).T)
+
+        pc += np.random.rand(*list(pc.shape)) * 1e-5
         offset = (np.max(pc, axis=0) + np.min(pc, axis=0)) / 2 - np.zeros(3,)
 
         pc -= offset[None, :]
         pc /= abs(pc).max()
 
-        pc = torch.Tensor(pc).float()[idx]
-        isforks = np.array(data['junction']['value']).astype(np.long)[idx]
+        pc = torch.from_numpy(pc).float()[idx]
+        direction = torch.from_numpy(direction).float()[idx]
+        isforks = isforks.astype(np.long)[idx]
 
-        gt_dict = {'is_fork': F.one_hot(torch.from_numpy(isforks)), 'name': self.data_list[index]}
+
+        gt_dict = {'is_fork': F.one_hot(torch.from_numpy(isforks)), 'name': self.data_list[index], 'dir': direction}
         
         return pc, gt_dict
 
