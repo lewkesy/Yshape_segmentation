@@ -145,23 +145,37 @@ class Segmentation(pl.LightningModule):
         c_out_3 = 512 + 512
 
         self.FP_modules = nn.ModuleList()
-        self.FP_modules.append(PointnetFPModule(mlp=[256, 128, 128]))
+        self.FP_modules.append(PointnetFPModule(mlp=[256, 256, 256]))
         self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_0, 256, 256]))
         self.FP_modules.append(PointnetFPModule(mlp=[256 + c_out_1, 256, 256]))
         self.FP_modules.append(PointnetFPModule(mlp=[c_out_3+c_out_2, 256, 256]))
 
         self.juncion_segmentation_layer = nn.Sequential(
-            nn.Conv1d(128, 128, kernel_size=1, bias=False),
+            nn.Conv1d(256, 256, kernel_size=1, bias=False),
+            nn.BatchNorm1d(256),
+            nn.ReLU(True),
+
+            nn.Conv1d(256, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
-            nn.Conv1d(128, 2, kernel_size=1),
+
+            nn.Conv1d(128, 64, kernel_size=1, bias=False),
+            nn.BatchNorm1d(64),
+            nn.ReLU(True),
+
+            nn.Conv1d(64, 2, kernel_size=1),
         )
         
         self.direction_layer = nn.Sequential(
-            nn.Conv1d(128, 128, kernel_size=1, bias=False),
+            nn.Conv1d(256, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
-            nn.Conv1d(128, 3, kernel_size=1),
+            
+            nn.Conv1d(128, 64, kernel_size=1, bias=False),
+            nn.BatchNorm1d(64),
+            nn.ReLU(True),
+            
+            nn.Conv1d(64, 3, kernel_size=1),
         )
 
 
@@ -203,7 +217,9 @@ class Segmentation(pl.LightningModule):
             
             recall = cls[pos_idx].sum() / gt_cls.sum()
 
-        loss = seg_loss + dir_loss
+        #TODO: test segmentation performance
+        # loss = seg_loss + dir_loss
+        loss = seg_loss
         log = dict(train_loss=loss)
 
         return dict(loss=loss, log=log, progress_bar=dict(train_loss=loss, dir_loss=dir_loss, acc=acc, recall=recall))
@@ -235,11 +251,14 @@ class Segmentation(pl.LightningModule):
 
         log = dict(val_loss=loss, acc=acc, recall=recall)
 
-        return dict(val_loss=loss, log=log, acc=acc, recall=recall, progress_bar=dict(val_loss=loss, dir_loss=dir_loss, acc=acc, recall=recall))
+        return dict(val_loss=loss, log=log, acc=acc, recall=recall, dir_loss=dir_loss, progress_bar=dict(val_loss=loss, dir_loss=dir_loss, acc=acc, recall=recall))
 
 
     def validation_epoch_end(self, outputs):
-        return outputs[0]
+        val_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
+        dir_loss = torch.stack([x['dir_loss'] for x in outputs]).mean()
+        print("dir_loss: %f"%dir_loss.item())
+        return {'val_loss': val_loss, 'dir_loss': dir_loss}
 
 
     def configure_optimizers(self):
@@ -278,21 +297,21 @@ class Segmentation(pl.LightningModule):
         return [optimizer], [lr_scheduler, bnm_scheduler]
 
 
-    def _build_dataloader(self, data_src, mode):
-        dset = SyntheticTreeDataset(data_src, mode)
+    def _build_dataloader(self, data_src, data_selection, mode):
+        dset = SyntheticTreeDataset(data_src, data_selection, mode)
         return DataLoader(
             dset,
             batch_size=self.hparams.batch_size,
             shuffle=mode == "train",
-            num_workers=4,
+            num_workers=8,
             pin_memory=True,
             drop_last=mode == "train",
         )
 
 
     def train_dataloader(self):
-        return self._build_dataloader(self.hparams['data_src'], mode="train")
+        return self._build_dataloader(self.hparams['data_src'], self.hparams['data_selection'], mode="train")
 
 
     def val_dataloader(self):
-        return self._build_dataloader(self.hparams['data_src'], mode="val")
+        return self._build_dataloader(self.hparams['data_src'], self.hparams['data_selection'], mode="val")

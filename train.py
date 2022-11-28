@@ -10,7 +10,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 if __name__ == "__main__":
     hparams = {'batch_size': 32,
-               'lc_count' : 512,
+               'lc_count' : 256,
                'input_channels' : 0,
                'use_xyz' : True,
                'lr': 0.001,
@@ -19,9 +19,10 @@ if __name__ == "__main__":
                'decay_step': 3e5,
                'bn_momentum': 0.5,
                'bnm_decay': 0.5,
-               'FL_alpha': 0.1,
+               'FL_alpha': 0.25,
                'FL_gamma': 2,
-               'data_src': '/mnt/samsung2t/zhou1178/PointCloud/',
+               'data_src': '/media/dummy1/zhou1178/PointCloud/PointCloud/',
+               'data_selection': 24000
                }
 
     logger = TensorBoardLogger("logs", name="Yshape_segment")
@@ -37,8 +38,8 @@ if __name__ == "__main__":
     )
     
     trainer = pl.Trainer(
-        gpus="0",
-        # distributed_backend='ddp',
+        gpus="0, 1",
+        distributed_backend='ddp',
         checkpoint_callback=checkpoint_callback,
         max_epochs=500,
         logger=logger,

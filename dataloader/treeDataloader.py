@@ -35,54 +35,52 @@ class RealTreeDataset(data.Dataset):
 
 
 class SyntheticTreeDataset(data.Dataset):
-    def __init__(self, data_src, mode):
+    def __init__(self, data_src, data_selection=512, train=True):
         super().__init__()
-        
+
         self.data_src = data_src
+        self.data_selection = data_selection
         data_list = os.listdir(data_src)
-        
-        if mode == 'train':
-            self.data_list = data_list[:int(len(data_list)*0.8)]
+
+        if train:
+            self.data_list = data_list[:int(len(data_list) * 0.8)]
         else:
-            self.data_list = data_list[int(len(data_list)*0.8):]
-    
+            self.data_list = data_list[int(len(data_list) * 0.8):]      
+
     def __len__(self):
         return len(self.data_list)
 
-    
+
     def __getitem__(self, index):
-        filename = os.path.join(self.data_src, self.data_list[index])
         
-        data = PlyData.read(filename)
+        filename = self.data_list[index] 
+        filepath = os.path.join(self.data_src, filename)
+        data = PlyData.read(filepath)
 
         x = data['vertex']['x']
         y = data['vertex']['y']
         z = data['vertex']['z']
+        isforks = (data['junctionIndex']['ji'] > 1).astype(int)
 
         dx = data['junction']['jx']
         dy = data['junction']['jy']
         dz = data['junction']['jz']
 
-        isforks = np.round(np.sqrt(dx**2 + dy**2 + dz**2) == 1)
+        pc = np.stack([x, y, z]).T
+        dir = np.stack([dx, dy, dz]).T
 
-        idx = np.random.choice(x.shape[0], 24000)
+        select_idx = np.random.choice(pc.shape[0], self.data_selection)
+        pc = pc[select_idx]
+        isforks = isforks[select_idx]
+        dir = dir[select_idx]
 
-        pc = (np.stack([x, y, z]).T)
-        direction = (np.stack([dx, dy, dz]).T)
-
-        pc += np.random.rand(*list(pc.shape)) * 1e-5
-        offset = (np.max(pc, axis=0) + np.min(pc, axis=0)) / 2 - np.zeros(3,)
-
-        pc -= offset[None, :]
+        pc -= np.mean(pc, axis=0)
         pc /= abs(pc).max()
 
-        pc = torch.from_numpy(pc).float()[idx]
-        direction = torch.from_numpy(direction).float()[idx]
-        isforks = isforks.astype(np.long)[idx]
-
-
-        gt_dict = {'is_fork': F.one_hot(torch.from_numpy(isforks)), 'name': self.data_list[index], 'dir': direction}
+        gt_dict = {'is_fork': F.one_hot(torch.from_numpy(isforks)), 'dir': torch.from_numpy(dir), 'name': self.data_list[index]}
         
+        pc = torch.Tensor(pc).float()
+
         return pc, gt_dict
 
 
